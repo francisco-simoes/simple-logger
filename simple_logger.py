@@ -3,15 +3,9 @@ import logging
 # Specify format for the logging (as simple as possible, to mimic normal prints).
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 
-# Create global logger. We will always use the same logger.
-global logger
-logger = logging.getLogger()
-# Create global boolean which will record the previous state of the logger, so that we can revert back to it. 
-global logger_bool_record
-logger_bool_record = True
 
-# The main function of this module is now defined. It basically acts as a printing function, the advantage being that you can deactivate the prints by disabling the logger.
-def log(*args, separator=' ', logger=logger):
+# The following function will be used to construct a log (printing) function which utilizes a specific logger from the Logger class of the logging module.
+def make_log(*args, separator=' ', logger):
     '''
     Logs args into the console using logger, separating them by separator.
     A (global) logger must be defined externally.
@@ -19,25 +13,43 @@ def log(*args, separator=' ', logger=logger):
     str_args = [str(arg) for arg in args]
     string = separator.join(str_args)
     logger.debug(string)
+    return
 
-# We need a simple a function which activates or not the logger depending on its argument.
-# This function will usually be called at the start of the function where we (may) want to use the logger.
-def logger_switch(printing: bool):
+# We now want function decorator which will create a local logger and switch it on or off as desired, reverting the logger to its original state after calling the function to decorate.
+# This allows logging in nested function smoothly.
+def with_logger(printing: bool, func, *args, **kargs):
     '''
-    Disables the logger in printing = False. Enables it if printing = True.
-    Records the original state of the logger in the global logger_bool_record.
+    Function decorator creating a local logger and switching it on if printing = True and off otherwise.
+    func must have an arg log at the first position, which we will set equal to a function log_func created locally.
+    *args and **kargs can contain all the arguments of func.
+    ----
+    Example:
+    > def f(log, x): 
+        log('x is {}'.format(x))
+        return x**2
+    > def f_with_logging(x, debug_prints=False):
+        return with_logger(debug_prints, f, x)
+    > f_with_logging(3, True)
+        > 'x is 3'
+        Out: 9
+    > f_with_logging(3)
+        Out: 9
     '''
-    logger_bool_record = logger.disabled
+    # Create logger variable, and switch it on/off
+    logger = logging.getLogger()
+    # The name logger will always refer to the same (root) logger object, so other functions will use the same (root) logger
+    # So we store the original logger state to restore it afterwards
+    logger_og_state = logger.disabled
     if printing:
         logger.disabled = False
     else:
         logger.disabled = True 
-
-# Finally, we create a cleanup function, which returns the logger to the state it was in before running logger_switch.
-# This is particularly important when we want to use the logger in nested functions, since its state in the inner function will affect its state in the outer function.
-def logger_cleanup():
-    '''
-    Reverts the logger back to its original state, before logger_switch was called.
-    '''
-    logger.disabled = logger_bool_record
-
+    # Now that a logger exists, we can define a log function to use in the function to decorate
+    log_func = lambda *args_: make_log(*args_, separator=' ', logger=logger)
+    # Run function to decorate
+    args = (log_func,) + args # Adds log_func to beginning of args
+    result = func(*args, **kargs)
+    #result = func(*args, **kargs, log=log_func)
+    # Restore logger state
+    logger.disabled = logger_og_state
+    return result
